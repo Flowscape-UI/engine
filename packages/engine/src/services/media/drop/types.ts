@@ -1,4 +1,5 @@
-import type { Point } from "../../core/camera";
+import type { Point } from "../../../core";
+
 
 export type MediaDropEvent = {
 	readonly files: readonly File[];

@@ -1,5 +1,6 @@
-import type { Rect, ShapePathCommand } from "../../../../nodes";
+import type { Rect } from "../../../../nodes";
 import { DropShadowMode } from "../../../../nodes";
+import { appendShapePath } from "../../utils";
 import type {
 	CanvasDropShadowState,
 	CanvasInnerShadowState,
@@ -224,7 +225,7 @@ function renderGeometryMask(
 
 	if (geometry.fillCommands.length > 0) {
 		context.beginPath();
-		appendPath(context, geometry.fillCommands);
+		appendShapePath(context, geometry.fillCommands);
 		context.fill();
 		expandCurrentPath(context, spread);
 	}
@@ -235,14 +236,14 @@ function renderGeometryMask(
 		}
 
 		context.beginPath();
-		appendPath(context, area.commands);
+		appendShapePath(context, area.commands);
 		context.fill(area.fillRule);
 		expandCurrentPath(context, spread);
 	}
 
 	if (geometry.fallbackStroke && geometry.fallbackStroke.width > 0) {
 		context.beginPath();
-		appendPath(context, geometry.fallbackStroke.commands);
+		appendShapePath(context, geometry.fallbackStroke.commands);
 
 		context.lineWidth = geometry.fallbackStroke.width + spread * 2;
 
@@ -254,56 +255,6 @@ function renderGeometryMask(
 	context.resetTransform();
 
 	return canvas;
-}
-
-function appendPath(
-	context: CanvasRenderingContext2D,
-	commands: readonly ShapePathCommand[],
-): void {
-	for (const command of commands) {
-		switch (command.type) {
-			case "moveTo":
-				context.moveTo(command.point.x, command.point.y);
-				break;
-
-			case "lineTo":
-				context.lineTo(command.point.x, command.point.y);
-				break;
-
-			case "quadraticCurveTo":
-				context.quadraticCurveTo(
-					command.control.x,
-					command.control.y,
-					command.point.x,
-					command.point.y,
-				);
-				break;
-
-			case "arcTo": {
-				if (command.radiusX <= 0 || command.radiusY <= 0) {
-					break;
-				}
-
-				context.save();
-				context.translate(command.center.x, command.center.y);
-				context.scale(command.radiusX, command.radiusY);
-				context.arc(
-					0,
-					0,
-					1,
-					(command.startAngle * Math.PI) / 180,
-					(command.endAngle * Math.PI) / 180,
-					!command.clockwise,
-				);
-				context.restore();
-				break;
-			}
-
-			case "closePath":
-				context.closePath();
-				break;
-		}
-	}
 }
 
 function expandCurrentPath(

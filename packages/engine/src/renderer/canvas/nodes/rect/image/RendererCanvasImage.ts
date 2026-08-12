@@ -1,7 +1,7 @@
 import Konva from "konva";
 import { RendererCanvasBase } from "../../base";
 import { ImageFit, type NodeImage } from "../../../../../nodes";
-import { appendShapePath } from "../../..";
+import { appendShapePath } from "../../../utils";
 
 const MEDIA_CONTENT_NAME = "media-content";
 const MEDIA_CONTENT_SELECTOR = `.${MEDIA_CONTENT_NAME}`;

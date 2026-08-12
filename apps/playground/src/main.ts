@@ -19,7 +19,7 @@ import {
 	NodeStar,
 	NodeText,
 	// NodeGroup,
-	LineCap,
+	// LineCap,
 	TextAlign,
 	TextWrapMode,
 	TextVerticalAlign,
@@ -40,6 +40,7 @@ import {
 	NodeVideo,
 	type ImportedMedia,
 } from "@flowscape-ui/core-sdk";
+import { LineEnding } from "@flowscape-ui/core-sdk";
 
 const container = document.querySelector<HTMLDivElement>("#app");
 
@@ -211,7 +212,7 @@ pathNode.setSize(250, 180);
 pathNode.setFillMode(FillMode.LinearGradient);
 // pathNode.setFill("#67E8F9");
 pathNode.setStrokeFill("#155E75");
-pathNode.setStrokeWidth([3]);
+pathNode.setStrokeWidth([10]);
 pathNode.moveTo({ x: 22, y: 125 });
 pathNode.cubicTo({ x: 55, y: 10 }, { x: 165, y: 12 }, { x: 210, y: 80 });
 pathNode.quadTo({ x: 240, y: 118 }, { x: 190, y: 150 });
@@ -224,9 +225,12 @@ lineNode.setPosition(720, 320);
 lineNode.setStart({ x: 20, y: 20 });
 lineNode.setEnd({ x: 220, y: 140 });
 lineNode.setStrokeFill("#FCA5A5");
-lineNode.setStrokeThickness(18);
-lineNode.setLineCapStart(LineCap.Round);
-lineNode.setLineCapEnd(LineCap.Square);
+lineNode.setStrokeThickness(2);
+// lineNode.setLineCapStart(LineCap.Square);
+// lineNode.setLineCapEnd(LineCap.Round);
+lineNode.setEndEnding(LineEnding.TriangleArrow);
+lineNode.setStartEnding(LineEnding.DiamondArrow);
+lineNode.setStrokeStyle(StrokeStyle.Dashed);
 lineNode.effectManager.add(dropShadowEffect);
 
 const textNode = new NodeText(7);
