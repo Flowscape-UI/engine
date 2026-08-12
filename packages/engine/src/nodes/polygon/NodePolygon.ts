@@ -130,8 +130,6 @@ export class NodePolygon extends ShapeBase implements INodePolygon {
 	}
 
 	protected _getVertices(): Vector2[] {
-		console.log("herer");
-
 		const sides = this._sideCount;
 
 		const rx = this.getWidth() / 2;

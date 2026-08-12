@@ -1,11 +1,3 @@
-import { formatRgb, parse, type Color } from "culori";
-import {
-	ConicGradient,
-	DiamondGradient,
-	LinearGradient,
-	MeshGradient,
-	RadialGradient,
-} from "../../../style-sheet/color";
 import { MathF32 } from "../../../core/math";
 import { LayerType, LayerBase } from "../base";
 import type {
@@ -18,14 +10,9 @@ import type {
 } from "./types";
 
 export class LayerBackground extends LayerBase implements ILayerBackground {
-	private static readonly DEFAULT_FILL: Color = {
-		mode: "rgb",
-		r: 30,
-		g: 30,
-		b: 30,
-	};
+	private static readonly DEFAULT_FILL: string = "#1E1E1E";
 
-	private _fill: Color | string;
+	private _fill: string;
 	private _image: string;
 
 	// Raw user values
@@ -72,28 +59,17 @@ export class LayerBackground extends LayerBase implements ILayerBackground {
 	}
 
 	public getFill(): string {
-		return typeof this._fill === "string"
-			? this._fill
-			: formatRgb(this._fill);
+		return this._fill;
 	}
 
 	public setFill(value: string): void {
 		const newValue = value.trim();
-		if (newValue === this._fill) {
+
+		if (!newValue || newValue === this._fill) {
 			return;
 		}
-		if (parse(newValue) !== undefined) {
-			this._fill = newValue;
-		}
-		if (
-			LinearGradient.isValidString(newValue) ||
-			RadialGradient.isValidString(newValue) ||
-			ConicGradient.isValidString(newValue) ||
-			DiamondGradient.isValidString(newValue) ||
-			MeshGradient.isValidString(newValue)
-		) {
-			this._fill = newValue;
-		}
+
+		this._fill = newValue;
 	}
 
 	/*****************************************************************/

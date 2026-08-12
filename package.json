@@ -10,6 +10,8 @@
 		"build": "turbo run build",
 		"dev": "turbo run dev",
 		"lint": "turbo run lint",
+		"test": "turbo run test",
+		"test:engine": "turbo run test --filter=@flowscape-ui/core-sdk",
 		"typecheck": "turbo run typecheck",
 		"format": "prettier --write apps packages",
 		"format:check": "prettier --check apps packages",
@@ -17,6 +19,7 @@
 		"dev:docs": "turbo run dev --filter=@flowscape-ui/docs",
 		"build:playground": "turbo run build --filter=@flowscape-ui/playground",
 		"build:docs": "turbo run build --filter=@flowscape-ui/docs",
+		"build:engine": "turbo run build --filter=@flowscape-ui/core-sdk",
 		"version:patch": "npm version patch --workspace=@flowscape-ui/core-sdk --no-git-tag-version && bun install --lockfile-only",
 		"version:minor": "npm version minor --workspace=@flowscape-ui/core-sdk --no-git-tag-version && bun install --lockfile-only",
 		"version:major": "npm version major --workspace=@flowscape-ui/core-sdk --no-git-tag-version && bun install --lockfile-only"
