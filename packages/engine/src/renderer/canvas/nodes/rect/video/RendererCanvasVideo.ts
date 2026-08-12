@@ -1,6 +1,10 @@
 import Konva from "konva";
 import { RendererCanvasBase } from "../../base";
+import { appendShapePath } from "../../../utils";
 import { ImageFit, type NodeVideo } from "../../../../../nodes";
+
+const MEDIA_CONTENT_NAME = "media-content";
+const MEDIA_CONTENT_SELECTOR = `.${MEDIA_CONTENT_NAME}`;
 
 const VIDEO_NAME = "video-fill";
 const VIDEO_SELECTOR = `.${VIDEO_NAME}`;
@@ -14,6 +18,11 @@ export class RendererCanvasVideo extends RendererCanvasBase<NodeVideo> {
 			id: String(node.id),
 		});
 
+		const mediaContent = new Konva.Group({
+			name: MEDIA_CONTENT_NAME,
+			listening: false,
+		});
+
 		const video = new Konva.Image({
 			name: VIDEO_NAME,
 			listening: false,
@@ -24,16 +33,27 @@ export class RendererCanvasVideo extends RendererCanvasBase<NodeVideo> {
 			image: undefined,
 		});
 
-		group.add(video);
+		mediaContent.add(video);
+		group.add(mediaContent);
 
 		return group;
 	}
 
 	protected onUpdate(node: NodeVideo, view: Konva.Group): void {
+		const mediaContent = this._findOneOrThrow<Konva.Group>(
+			view,
+			MEDIA_CONTENT_SELECTOR,
+		);
 		const videoShape = this._findOneOrThrow<Konva.Image>(
 			view,
 			VIDEO_SELECTOR,
 		);
+
+		const clipCommands = node.toPathCommands();
+
+		mediaContent.clipFunc((context) => {
+			appendShapePath(context, clipCommands);
+		});
 
 		const width = Math.max(0, node.getWidth());
 		const height = Math.max(0, node.getHeight());
