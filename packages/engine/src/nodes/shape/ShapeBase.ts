@@ -393,6 +393,10 @@ export class ShapeBase extends NodeBase implements IShapeBase {
 		];
 	}
 
+	public toStrokePathCommands(): readonly ShapePathCommand[] {
+		return this.toPathCommands();
+	} 
+
 	public getLocalViewOBB(): Rect {
 		const bounds = this.getLocalOBB();
 		const outset = this._getViewStrokeOutset();

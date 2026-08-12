@@ -1,10 +1,38 @@
-import { EPSILON } from "../../core";
-import type { Vector2 } from "../../core/transform";
-import type { ID } from "../../core/types";
-import { NodeType } from "../base";
-import { ShapeBase, type ShapePathCommand, type StrokeWidth } from "../shape";
-import { matrixInvert } from "../utils/matrix-invert";
+import { EPSILON, type ID, type Vector2 } from "../../core";
+import {
+	resolveStrokePathMetrics,
+	resolveStrokePatternGeometry,
+	ShapeBase,
+	StrokeAlign,
+	StrokeDashCap,
+	StrokeStyle,
+	type ShapePathCommand,
+	type ShapeStrokeArea,
+	type ShapeStrokePath,
+	type StrokeWidth,
+} from "../shape";
+import { NodeType, type Rect } from "../base";
+import { matrixInvert } from "../utils";
 import { LineCap, LineEnding, type INodeLine } from "./types";
+
+type ResolvedLineStrokeGeometry = Readonly<{
+	halfThickness: number;
+	length: number;
+	direction: Vector2;
+	normal: Vector2;
+	normalAngle: number;
+	outline: readonly [Vector2, Vector2, Vector2, Vector2];
+}>;
+
+type ResolvedLineEndingLayout = Readonly<{
+	bodyStart: Vector2;
+	bodyEnd: Vector2;
+	startLength: number;
+	endLength: number;
+	bodyLength: number;
+
+	outline: readonly [Vector2, Vector2, Vector2, Vector2];
+}>;
 
 export class NodeLine extends ShapeBase implements INodeLine {
 	private _start: Vector2;
@@ -17,6 +45,10 @@ export class NodeLine extends ShapeBase implements INodeLine {
 
 	private _startEnding: LineEnding;
 	private _endEnding: LineEnding;
+
+	private static readonly MIN_LINE_ENDING_LENGTH = 8;
+	private static readonly LINE_ENDING_LENGTH_FACTOR = 4;
+	private static readonly LINE_ENDING_HALF_WIDTH_FACTOR = 0.6;
 
 	constructor(id: ID, name?: string) {
 		super(id, NodeType.Line, name ?? "Line");
@@ -165,105 +197,200 @@ export class NodeLine extends ShapeBase implements INodeLine {
 		];
 	}
 
-	// TODO: Implement when will make transfer ToPath
-	// public override toPathCommands(): readonly ShapePathCommand[] {
-	//     const halfThickness = this._thickness / 2;
+	public override toStrokePathCommands(): readonly ShapePathCommand[] {
+		const geometry = this._resolveStrokeGeometry();
 
-	//     if (halfThickness <= 0) {
-	//         return [];
-	//     }
+		if (!geometry) {
+			return [];
+		}
 
-	//     const startX = this._start.x;
-	//     const startY = this._start.y;
-	//     const endX = this._end.x;
-	//     const endY = this._end.y;
+		const layout = this._resolveLineEndingLayout(geometry);
 
-	//     const dx = endX - startX;
-	//     const dy = endY - startY;
-	//     const length = Math.sqrt(dx * dx + dy * dy);
+		if (layout.bodyLength <= EPSILON) {
+			return [];
+		}
 
-	//     const commands: ShapePathCommand[] = [];
+		return [
+			{
+				type: "moveTo",
+				point: { ...layout.bodyStart },
+			},
+			{
+				type: "lineTo",
+				point: { ...layout.bodyEnd },
+			},
+		];
+	}
 
-	//     if (length <= NodeLine.EPSILON) {
-	//         if (this._lineCapStart === LineCap.Round || this._lineCapEnd === LineCap.Round) {
-	//             this._appendCirclePath(commands, startX, startY, halfThickness);
-	//             return commands;
-	//         }
+	public override getStrokePath(): ShapeStrokePath | null {
+		const geometry = this._resolveStrokeGeometry();
 
-	//         commands.push({
-	//             type: "moveTo",
-	//             point: { x: startX - halfThickness, y: startY - halfThickness },
-	//         });
-	//         commands.push({
-	//             type: "lineTo",
-	//             point: { x: startX + halfThickness, y: startY - halfThickness },
-	//         });
-	//         commands.push({
-	//             type: "lineTo",
-	//             point: { x: startX + halfThickness, y: startY + halfThickness },
-	//         });
-	//         commands.push({
-	//             type: "lineTo",
-	//             point: { x: startX - halfThickness, y: startY + halfThickness },
-	//         });
-	//         commands.push({ type: "closePath" });
-	//         return commands;
-	//     }
+		if (!geometry) {
+			return null;
+		}
 
-	//     const nx = dx / length;
-	//     const ny = dy / length;
+		const endingLayout = this._resolveLineEndingLayout(geometry);
 
-	//     const px = -ny;
-	//     const py = nx;
+		const {
+			bodyLength,
+			outline: [startSideA, endSideA, endSideB, startSideB],
+		} = endingLayout;
 
-	//     const startExtend = this._lineCapStart === LineCap.Square ? halfThickness : 0;
-	//     const endExtend = this._lineCapEnd === LineCap.Square ? halfThickness : 0;
+		const outer: ShapePathCommand[] = [];
 
-	//     const ax = startX - nx * startExtend;
-	//     const ay = startY - ny * startExtend;
-	//     const bx = endX + nx * endExtend;
-	//     const by = endY + ny * endExtend;
+		if (bodyLength > EPSILON) {
+			outer.push(
+				{
+					type: "moveTo",
+					point: startSideA,
+				},
+				{
+					type: "lineTo",
+					point: endSideA,
+				},
+			);
 
-	//     const p1x = ax + px * halfThickness;
-	//     const p1y = ay + py * halfThickness;
+			if (
+				this._endEnding === LineEnding.None &&
+				this._lineCapEnd === LineCap.Round
+			) {
+				outer.push({
+					type: "arcTo",
+					center: { ...this._end },
+					radiusX: geometry.halfThickness,
+					radiusY: geometry.halfThickness,
+					startAngle: geometry.normalAngle,
+					endAngle: geometry.normalAngle - 180,
+					clockwise: false,
+				});
+			} else {
+				outer.push({
+					type: "lineTo",
+					point: endSideB,
+				});
+			}
 
-	//     const p2x = bx + px * halfThickness;
-	//     const p2y = by + py * halfThickness;
+			outer.push({
+				type: "lineTo",
+				point: startSideB,
+			});
 
-	//     const p3x = bx - px * halfThickness;
-	//     const p3y = by - py * halfThickness;
+			if (
+				this._startEnding === LineEnding.None &&
+				this._lineCapStart === LineCap.Round
+			) {
+				outer.push({
+					type: "arcTo",
+					center: { ...this._start },
+					radiusX: geometry.halfThickness,
+					radiusY: geometry.halfThickness,
+					startAngle: geometry.normalAngle - 180,
+					endAngle: geometry.normalAngle - 360,
+					clockwise: false,
+				});
+			}
 
-	//     const p4x = ax - px * halfThickness;
-	//     const p4y = ay - py * halfThickness;
+			outer.push({
+				type: "closePath",
+			});
+		}
 
-	//     commands.push({
-	//         type: "moveTo",
-	//         point: { x: p1x, y: p1y },
-	//     });
-	//     commands.push({
-	//         type: "lineTo",
-	//         point: { x: p2x, y: p2y },
-	//     });
-	//     commands.push({
-	//         type: "lineTo",
-	//         point: { x: p3x, y: p3y },
-	//     });
-	//     commands.push({
-	//         type: "lineTo",
-	//         point: { x: p4x, y: p4y },
-	//     });
-	//     commands.push({ type: "closePath" });
+		const additionalAreas: ShapeStrokeArea[] = [];
 
-	//     if (this._lineCapStart === LineCap.Round) {
-	//         this._appendCirclePath(commands, startX, startY, halfThickness);
-	//     }
+		const startEndingArea = this._resolveLineEndingArea(
+			this._startEnding,
+			this._start,
+			{
+				x: -geometry.direction.x,
+				y: -geometry.direction.y,
+			},
+			endingLayout.startLength,
+		);
 
-	//     if (this._lineCapEnd === LineCap.Round) {
-	//         this._appendCirclePath(commands, endX, endY, halfThickness);
-	//     }
+		if (startEndingArea) {
+			additionalAreas.push(startEndingArea);
+		}
 
-	//     return commands;
-	// }
+		const endEndingArea = this._resolveLineEndingArea(
+			this._endEnding,
+			this._end,
+			geometry.direction,
+			endingLayout.endLength,
+		);
+
+		if (endEndingArea) {
+			additionalAreas.push(endEndingArea);
+		}
+
+		return {
+			outer,
+			inner: [],
+			...(additionalAreas.length > 0 ? { additionalAreas } : {}),
+		};
+	}
+
+	public override getLocalViewOBB(): Rect {
+		const strokePath = this.getStrokePath();
+
+		if (!strokePath) {
+			return this.getLocalOBB();
+		}
+
+		const areas: readonly ShapeStrokeArea[] = [
+			strokePath,
+			...(strokePath.additionalAreas ?? []),
+		];
+
+		const strokeStyle = this.getStrokeStyle();
+
+		/*
+		 * Pattern stroke строится отдельной системой.
+		 * Базовые bounds гарантированно покрывают его сегменты.
+		 */
+		let bounds: Rect | null =
+			strokeStyle === StrokeStyle.Dashed ||
+				strokeStyle === StrokeStyle.Dotted
+				? super.getLocalViewOBB()
+				: null;
+
+		for (const area of areas) {
+			const areaBounds = this._resolvePathCommandsBounds([
+				...area.outer,
+				...area.inner,
+			]);
+
+			if (!areaBounds) {
+				continue;
+			}
+
+			if (!bounds) {
+				bounds = areaBounds;
+				continue;
+			}
+
+			const minX = Math.min(bounds.x, areaBounds.x);
+			const minY = Math.min(bounds.y, areaBounds.y);
+
+			const maxX = Math.max(
+				bounds.x + bounds.width,
+				areaBounds.x + areaBounds.width,
+			);
+
+			const maxY = Math.max(
+				bounds.y + bounds.height,
+				areaBounds.y + areaBounds.height,
+			);
+
+			bounds = {
+				x: minX,
+				y: minY,
+				width: maxX - minX,
+				height: maxY - minY,
+			};
+		}
+
+		return bounds ?? this.getLocalOBB();
+	}
 
 	public override setWidth(value: number): void {
 		if (this.isLockedInHierarchy()) {
@@ -353,84 +480,37 @@ export class NodeLine extends ShapeBase implements INodeLine {
 
 	public override hitTest(worldPoint: Vector2): boolean {
 		try {
-			const invMatrix = matrixInvert(this.getWorldMatrix());
-			const localPoint = this._applyMatrixToPoint(invMatrix, worldPoint);
-			const localBounds = this._getLocalVisualBounds();
+			const inverseMatrix = matrixInvert(this.getWorldMatrix());
+
+			const localPoint = this._applyMatrixToPoint(
+				inverseMatrix,
+				worldPoint,
+			);
+
+			const localBounds = this.getLocalViewOBB();
 
 			if (
-				localBounds &&
-				(localPoint.x < localBounds.x ||
-					localPoint.x > localBounds.x + localBounds.width ||
-					localPoint.y < localBounds.y ||
-					localPoint.y > localBounds.y + localBounds.height)
+				localPoint.x < localBounds.x ||
+				localPoint.x > localBounds.x + localBounds.width ||
+				localPoint.y < localBounds.y ||
+				localPoint.y > localBounds.y + localBounds.height
 			) {
 				return false;
 			}
 
-			const ax = this._start.x;
-			const ay = this._start.y;
-			const bx = this._end.x;
-			const by = this._end.y;
+			const strokePath = this.getStrokePath();
 
-			const halfThickness = this._thickness / 2;
-
-			const abx = bx - ax;
-			const aby = by - ay;
-
-			const abLengthSq = abx * abx + aby * aby;
-
-			// Degenerate case: line collapsed into a point
-			if (abLengthSq === 0) {
-				const dx = localPoint.x - ax;
-				const dy = localPoint.y - ay;
-
-				return dx * dx + dy * dy <= halfThickness * halfThickness;
+			if (!strokePath) {
+				return false;
 			}
 
-			const abLength = Math.sqrt(abLengthSq);
+			const areas: readonly ShapeStrokeArea[] = [
+				strokePath,
+				...(strokePath.additionalAreas ?? []),
+			];
 
-			const startExtend =
-				this._lineCapStart === LineCap.Square ? halfThickness : 0;
-			const endExtend =
-				this._lineCapEnd === LineCap.Square ? halfThickness : 0;
-
-			const minT = -startExtend / abLength;
-			const maxT = 1 + endExtend / abLength;
-
-			let t =
-				((localPoint.x - ax) * abx + (localPoint.y - ay) * aby) /
-				abLengthSq;
-
-			if (t < minT) {
-				t = minT;
-			} else if (t > maxT) {
-				t = maxT;
-			}
-
-			const closestX = ax + abx * t;
-			const closestY = ay + aby * t;
-
-			const dx = localPoint.x - closestX;
-			const dy = localPoint.y - closestY;
-
-			if (dx * dx + dy * dy <= halfThickness * halfThickness) {
-				return true;
-			}
-
-			if (this._lineCapStart === LineCap.Round) {
-				const sdx = localPoint.x - ax;
-				const sdy = localPoint.y - ay;
-
-				if (sdx * sdx + sdy * sdy <= halfThickness * halfThickness) {
-					return true;
-				}
-			}
-
-			if (this._lineCapEnd === LineCap.Round) {
-				const edx = localPoint.x - bx;
-				const edy = localPoint.y - by;
-
-				if (edx * edx + edy * edy <= halfThickness * halfThickness) {
+			for (const area of areas) {
+				if (this._isPointInsideStrokeArea(localPoint, area)) {
 					return true;
 				}
 			}
@@ -444,68 +524,116 @@ export class NodeLine extends ShapeBase implements INodeLine {
 	/*********************************************************/
 	/*                         Helpers                       */
 	/*********************************************************/
-	// TODO: uncomment when need this
-	// private _appendCirclePath(
-	//     commands: ShapePathCommand[],
-	//     cx: number,
-	//     cy: number,
-	//     radius: number
-	// ): void {
-	//     if (radius <= 0) {
-	//         return;
-	//     }
 
-	//     commands.push({
-	//         type: "moveTo",
-	//         point: { x: cx + radius, y: cy },
-	//     });
-	//     commands.push({
-	//         type: "arcTo",
-	//         center: { x: cx, y: cy },
-	//         radiusX: radius,
-	//         radiusY: radius,
-	//         startAngle: 0,
-	//         endAngle: 360,
-	//         clockwise: true,
-	//     });
-	//     commands.push({ type: "closePath" });
-	// }
+	private _isPointInsideStrokeArea(
+		point: Vector2,
+		area: ShapeStrokeArea,
+	): boolean {
+		let inside = false;
 
-	private _getLocalVisualBounds(): {
-		x: number;
-		y: number;
-		width: number;
-		height: number;
-	} | null {
-		const commands = this.toPathCommands();
+		for (const commands of [area.outer, area.inner]) {
+			if (commands.length === 0) {
+				continue;
+			}
 
-		if (commands.length === 0) {
-			return null;
+			const metrics = resolveStrokePathMetrics(commands);
+
+			if (!metrics.closed || metrics.points.length < 3) {
+				continue;
+			}
+
+			const polygon = metrics.points.map(
+				(metricPoint) => metricPoint.point,
+			);
+
+			if (this._isPointInsidePolygon(point, polygon)) {
+				inside = !inside;
+			}
 		}
 
+		return inside;
+	}
+
+	private _isPointInsidePolygon(
+		point: Vector2,
+		polygon: readonly Vector2[],
+	): boolean {
+		let inside = false;
+
+		for (
+			let index = 0, previousIndex = polygon.length - 1;
+			index < polygon.length;
+			previousIndex = index++
+		) {
+			const current = polygon[index]!;
+			const previous = polygon[previousIndex]!;
+
+			const intersects =
+				current.y > point.y !== previous.y > point.y &&
+				point.x <
+				((previous.x - current.x) *
+					(point.y - current.y)) /
+				(previous.y - current.y) +
+				current.x;
+
+			if (intersects) {
+				inside = !inside;
+			}
+		}
+
+		return inside;
+	}
+
+	private _resolvePathCommandsBounds(
+		commands: readonly ShapePathCommand[],
+	): Rect | null {
 		let minX = Number.POSITIVE_INFINITY;
 		let minY = Number.POSITIVE_INFINITY;
 		let maxX = Number.NEGATIVE_INFINITY;
 		let maxY = Number.NEGATIVE_INFINITY;
 
-		for (const command of commands) {
-			if (command.type === "moveTo" || command.type === "lineTo") {
-				if (command.point.x < minX) minX = command.point.x;
-				if (command.point.y < minY) minY = command.point.y;
-				if (command.point.x > maxX) maxX = command.point.x;
-				if (command.point.y > maxY) maxY = command.point.y;
-				continue;
-			}
+		const includePoint = (point: Vector2): void => {
+			minX = Math.min(minX, point.x);
+			minY = Math.min(minY, point.y);
+			maxX = Math.max(maxX, point.x);
+			maxY = Math.max(maxY, point.y);
+		};
 
-			if (command.type === "arcTo") {
-				if (command.center.x - command.radiusX < minX)
-					minX = command.center.x - command.radiusX;
-				if (command.center.y - command.radiusY < minY)
-					minY = command.center.y - command.radiusY;
-				if (command.center.x + command.radiusX > maxX)
-					maxX = command.center.x + command.radiusX;
-				if (command.center.y + command.radiusY > maxY)
-					maxY = command.center.y + command.radiusY;
+		for (const command of commands) {
+			switch (command.type) {
+				case "moveTo":
+				case "lineTo":
+					includePoint(command.point);
+					break;
+
+				case "quadraticCurveTo":
+					/*
+					 * Control hull даёт безопасные bounds
+					 * для всей quadratic curve.
+					 */
+					includePoint(command.control);
+					includePoint(command.point);
+					break;
+
+				case "arcTo": {
+					const radiusX = Math.abs(command.radiusX);
+					const radiusY = Math.abs(command.radiusY);
+
+					includePoint({
+						x: command.center.x - radiusX,
+						y: command.center.y - radiusY,
+					});
+
+					includePoint({
+						x: command.center.x + radiusX,
+						y: command.center.y + radiusY,
+					});
+
+					break;
+				}
+
+				case "closePath":
+					break;
 			}
 		}
 
@@ -523,6 +651,412 @@ export class NodeLine extends ShapeBase implements INodeLine {
 			y: minY,
 			width: maxX - minX,
 			height: maxY - minY,
+		};
+	}
+
+	private _resolveStrokeGeometry(): ResolvedLineStrokeGeometry | null {
+		const halfThickness = this._thickness / 2;
+
+		if (halfThickness <= EPSILON) {
+			return null;
+		}
+
+		const dx = this._end.x - this._start.x;
+		const dy = this._end.y - this._start.y;
+		const length = Math.hypot(dx, dy);
+
+		if (length <= EPSILON) {
+			return null;
+		}
+
+		const direction = {
+			x: dx / length,
+			y: dy / length,
+		};
+
+		const normal = {
+			x: -direction.y,
+			y: direction.x,
+		};
+
+		const startExtension =
+			this._startEnding === LineEnding.None &&
+				this._lineCapStart === LineCap.Square
+				? halfThickness
+				: 0;
+
+		const endExtension =
+			this._endEnding === LineEnding.None &&
+				this._lineCapEnd === LineCap.Square
+				? halfThickness
+				: 0;
+
+		const startCenter = {
+			x: this._start.x - direction.x * startExtension,
+			y: this._start.y - direction.y * startExtension,
+		};
+
+		const endCenter = {
+			x: this._end.x + direction.x * endExtension,
+			y: this._end.y + direction.y * endExtension,
+		};
+
+		const offset = {
+			x: normal.x * halfThickness,
+			y: normal.y * halfThickness,
+		};
+
+		return {
+			halfThickness,
+			length,
+			direction,
+			normal,
+			normalAngle: (Math.atan2(normal.y, normal.x) * 180) / Math.PI,
+
+			outline: [
+				{
+					x: startCenter.x + offset.x,
+					y: startCenter.y + offset.y,
+				},
+				{
+					x: endCenter.x + offset.x,
+					y: endCenter.y + offset.y,
+				},
+				{
+					x: endCenter.x - offset.x,
+					y: endCenter.y - offset.y,
+				},
+				{
+					x: startCenter.x - offset.x,
+					y: startCenter.y - offset.y,
+				},
+			],
+		};
+	}
+
+	private _resolveLineEndingArea(
+		ending: LineEnding,
+		anchor: Vector2,
+		outwardDirection: Vector2,
+		endingLength: number,
+	): ShapeStrokeArea | null {
+		if (ending === LineEnding.None) {
+			return null;
+		}
+
+		if (endingLength <= EPSILON) {
+			return null;
+		}
+
+		const normal = {
+			x: -outwardDirection.y,
+			y: outwardDirection.x,
+		};
+
+		const halfWidth = endingLength * NodeLine.LINE_ENDING_HALF_WIDTH_FACTOR;
+
+		const baseCenter = {
+			x: anchor.x - outwardDirection.x * endingLength,
+			y: anchor.y - outwardDirection.y * endingLength,
+		};
+
+		const sideA = {
+			x: baseCenter.x + normal.x * halfWidth,
+			y: baseCenter.y + normal.y * halfWidth,
+		};
+
+		const sideB = {
+			x: baseCenter.x - normal.x * halfWidth,
+			y: baseCenter.y - normal.y * halfWidth,
+		};
+
+		switch (ending) {
+			case LineEnding.LineArrow:
+				return this._createLineArrowArea(sideA, anchor, sideB);
+
+			case LineEnding.TriangleArrow:
+				return this._createClosedEndingArea([anchor, sideA, sideB]);
+
+			case LineEnding.ReversedTriangle: {
+				const baseA = {
+					x: anchor.x + normal.x * halfWidth,
+					y: anchor.y + normal.y * halfWidth,
+				};
+
+				const baseB = {
+					x: anchor.x - normal.x * halfWidth,
+					y: anchor.y - normal.y * halfWidth,
+				};
+
+				return this._createClosedEndingArea([baseA, baseCenter, baseB]);
+			}
+
+			case LineEnding.CircleArrow: {
+				const radius = endingLength / 2;
+
+				const center = {
+					x: anchor.x,
+					y: anchor.y,
+				};
+
+				return {
+					outer: [
+						{
+							type: "moveTo",
+							point: {
+								x: center.x + radius,
+								y: center.y,
+							},
+						},
+						{
+							type: "arcTo",
+							center,
+							radiusX: radius,
+							radiusY: radius,
+							startAngle: 0,
+							endAngle: 360,
+							clockwise: true,
+						},
+						{
+							type: "closePath",
+						},
+					],
+					inner: [],
+				};
+			}
+
+			case LineEnding.DiamondArrow: {
+				const halfLength = endingLength / 2;
+				const halfWidth = endingLength / 2;
+
+				const front = {
+					x: anchor.x + outwardDirection.x * halfLength,
+					y: anchor.y + outwardDirection.y * halfLength,
+				};
+
+				const back = {
+					x: anchor.x - outwardDirection.x * halfLength,
+					y: anchor.y - outwardDirection.y * halfLength,
+				};
+
+				const sideA = {
+					x: anchor.x + normal.x * halfWidth,
+					y: anchor.y + normal.y * halfWidth,
+				};
+
+				const sideB = {
+					x: anchor.x - normal.x * halfWidth,
+					y: anchor.y - normal.y * halfWidth,
+				};
+
+				return this._createClosedEndingArea([
+					front,
+					sideA,
+					back,
+					sideB,
+				]);
+			}
+
+			default:
+				return null;
+		}
+	}
+
+	private _resolveLineEndingLength(
+		ending: LineEnding,
+		maximumLength: number,
+	): number {
+		if (ending === LineEnding.None) {
+			return 0;
+		}
+
+		const preferredLength = Math.max(
+			NodeLine.MIN_LINE_ENDING_LENGTH,
+			this._thickness * NodeLine.LINE_ENDING_LENGTH_FACTOR,
+		);
+
+		return Math.min(preferredLength, Math.max(0, maximumLength));
+	}
+
+	private _resolveLineEndingBodyInset(
+		ending: LineEnding,
+		endingLength: number,
+	): number {
+		switch (ending) {
+			case LineEnding.TriangleArrow:
+			case LineEnding.ReversedTriangle:
+				return endingLength / 2;
+			default:
+				return 0;
+		}
+	}
+
+	private _resolveLineEndingLayout(
+		geometry: ResolvedLineStrokeGeometry,
+	): ResolvedLineEndingLayout {
+		const hasStartEnding = this._startEnding !== LineEnding.None;
+		const hasEndEnding = this._endEnding !== LineEnding.None;
+
+		const maximumEndingLength =
+			hasStartEnding && hasEndEnding
+				? geometry.length / 2
+				: geometry.length;
+
+		const startLength = this._resolveLineEndingLength(
+			this._startEnding,
+			maximumEndingLength,
+		);
+
+		const endLength = this._resolveLineEndingLength(
+			this._endEnding,
+			maximumEndingLength,
+		);
+
+		const startInset = this._resolveLineEndingBodyInset(
+			this._startEnding,
+			startLength,
+		);
+
+		const endInset = this._resolveLineEndingBodyInset(
+			this._endEnding,
+			endLength,
+		);
+
+		const startExtension =
+			this._startEnding === LineEnding.None &&
+				this._lineCapStart === LineCap.Square
+				? geometry.halfThickness
+				: 0;
+
+		const endExtension =
+			this._endEnding === LineEnding.None &&
+				this._lineCapEnd === LineCap.Square
+				? geometry.halfThickness
+				: 0;
+
+		const startDistance = startInset - startExtension;
+
+		const endDistance = geometry.length - endInset + endExtension;
+
+		const bodyLength = Math.max(0, endDistance - startDistance);
+
+		const bodyStart = {
+			x: this._start.x + geometry.direction.x * startDistance,
+			y: this._start.y + geometry.direction.y * startDistance,
+		};
+
+		const bodyEnd =
+			bodyLength > EPSILON
+				? {
+					x: this._start.x + geometry.direction.x * endDistance,
+					y: this._start.y + geometry.direction.y * endDistance,
+				}
+				: { ...bodyStart };
+
+		const offset = {
+			x: geometry.normal.x * geometry.halfThickness,
+			y: geometry.normal.y * geometry.halfThickness,
+		};
+
+		return {
+			startLength,
+			endLength,
+			bodyLength,
+			bodyStart,
+			bodyEnd,
+			outline: [
+				{
+					x: bodyStart.x + offset.x,
+					y: bodyStart.y + offset.y,
+				},
+				{
+					x: bodyEnd.x + offset.x,
+					y: bodyEnd.y + offset.y,
+				},
+				{
+					x: bodyEnd.x - offset.x,
+					y: bodyEnd.y - offset.y,
+				},
+				{
+					x: bodyStart.x - offset.x,
+					y: bodyStart.y - offset.y,
+				},
+			],
+		};
+	}
+
+	private _createLineArrowArea(
+		sideA: Vector2,
+		anchor: Vector2,
+		sideB: Vector2,
+	): ShapeStrokeArea | null {
+		const commands: ShapePathCommand[] = [
+			{
+				type: "moveTo",
+				point: { ...sideA },
+			},
+			{
+				type: "lineTo",
+				point: { ...anchor },
+			},
+			{
+				type: "lineTo",
+				point: { ...sideB },
+			},
+		];
+
+		const centerlineLength =
+			Math.hypot(anchor.x - sideA.x, anchor.y - sideA.y) +
+			Math.hypot(sideB.x - anchor.x, sideB.y - anchor.y);
+
+		const [resolved] = resolveStrokePatternGeometry(commands, {
+			strokeWidth: this._thickness,
+			strokeAlign: StrokeAlign.Center,
+			length: centerlineLength + 1,
+			gap: 0,
+			cap: StrokeDashCap.Flat,
+		});
+
+		if (!resolved) {
+			return null;
+		}
+
+		return {
+			outer: resolved.commands,
+			inner: [],
+		};
+	}
+
+	private _createClosedEndingArea(
+		points: readonly Vector2[],
+	): ShapeStrokeArea | null {
+		const first = points[0];
+
+		if (!first || points.length < 3) {
+			return null;
+		}
+
+		const outer: ShapePathCommand[] = [
+			{
+				type: "moveTo",
+				point: { ...first },
+			},
+		];
+
+		for (let index = 1; index < points.length; index += 1) {
+			outer.push({
+				type: "lineTo",
+				point: { ...points[index]! },
+			});
+		}
+
+		outer.push({
+			type: "closePath",
+		});
+
+		return {
+			outer,
+			inner: [],
 		};
 	}
 
