@@ -503,11 +503,11 @@ export class NodeBase implements INode {
 		if (this.isLockedInHierarchy()) {
 			return;
 		}
-		const newValue = MathF32.degToRad(delta);
-		if (this._transform.getRotation() === newValue) {
+		const deltaRadians = MathF32.degToRad(delta);
+		if (deltaRadians === 0) {
 			return;
 		}
-		this._transform.rotate(newValue);
+		this._transform.rotate(deltaRadians);
 		this.setDirty();
 	}
 

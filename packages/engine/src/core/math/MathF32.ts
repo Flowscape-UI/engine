@@ -68,15 +68,11 @@ export class MathF32 {
 	}
 
 	public static min(a: number, b: number): number {
-		const af32 = this.toF32(a);
-		const bf32 = this.toF32(b);
-		return af32 < bf32 ? af32 : bf32;
+		return this.toF32(Math.min(this.toF32(a), this.toF32(b)));
 	}
 
 	public static max(a: number, b: number): number {
-		const af32 = this.toF32(a);
-		const bf32 = this.toF32(b);
-		return af32 > bf32 ? af32 : bf32;
+		return this.toF32(Math.max(this.toF32(a), this.toF32(b)));
 	}
 
 	public static clamp(value: number, min: number, max: number): number {

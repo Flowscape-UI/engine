@@ -36,8 +36,6 @@ export class NodeStar extends NodePolygon implements INodeStar {
 	/*********************************************************/
 
 	protected override _getVertices(): Vector2[] {
-		console.log("herererer");
-
 		const sides = this.getSideCount();
 
 		const rx = this.getWidth() / 2;

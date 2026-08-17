@@ -1,3 +1,4 @@
+import { ImageFit } from "@flowscape-ui/core-sdk";
 import logoUrl from "./assets/images/logo.png";
 
 import {
@@ -18,7 +19,7 @@ import {
 	NodeStar,
 	NodeText,
 	// NodeGroup,
-	LineCap,
+	// LineCap,
 	TextAlign,
 	TextWrapMode,
 	TextVerticalAlign,
@@ -31,7 +32,15 @@ import {
 	ShapeEffectInnerShadow,
 	ShapeEffectLayerBlur,
 	ShapeEffectBackgroundBlur,
+
+	MediaDropTarget,
+	ServiceMediaImport,
+	MediaKind,
+	NodeImage,
+	NodeVideo,
+	type ImportedMedia,
 } from "@flowscape-ui/core-sdk";
+import { LineEnding } from "@flowscape-ui/core-sdk";
 
 const container = document.querySelector<HTMLDivElement>("#app");
 
@@ -203,7 +212,7 @@ pathNode.setSize(250, 180);
 pathNode.setFillMode(FillMode.LinearGradient);
 // pathNode.setFill("#67E8F9");
 pathNode.setStrokeFill("#155E75");
-pathNode.setStrokeWidth([3]);
+pathNode.setStrokeWidth([10]);
 pathNode.moveTo({ x: 22, y: 125 });
 pathNode.cubicTo({ x: 55, y: 10 }, { x: 165, y: 12 }, { x: 210, y: 80 });
 pathNode.quadTo({ x: 240, y: 118 }, { x: 190, y: 150 });
@@ -216,9 +225,12 @@ lineNode.setPosition(720, 320);
 lineNode.setStart({ x: 20, y: 20 });
 lineNode.setEnd({ x: 220, y: 140 });
 lineNode.setStrokeFill("#FCA5A5");
-lineNode.setStrokeThickness(18);
-lineNode.setLineCapStart(LineCap.Round);
-lineNode.setLineCapEnd(LineCap.Square);
+lineNode.setStrokeThickness(2);
+// lineNode.setLineCapStart(LineCap.Square);
+// lineNode.setLineCapEnd(LineCap.Round);
+lineNode.setEndEnding(LineEnding.TriangleArrow);
+lineNode.setStartEnding(LineEnding.DiamondArrow);
+lineNode.setStrokeStyle(StrokeStyle.Dashed);
 lineNode.effectManager.add(dropShadowEffect);
 
 const textNode = new NodeText(7);
@@ -256,6 +268,127 @@ layerWorld.addNode(starNode);
 layerWorld.addNode(pathNode);
 
 // layerWorld.moveNodesToTop([polygonNode.id]);
+
+const mediaImporter = new ServiceMediaImport();
+const mediaDropTarget = new MediaDropTarget();
+
+const surface = canvasRendererHost.getSurface();
+
+const mediaResources = new Map<number, ImportedMedia>();
+
+mediaDropTarget.attach(surface);
+
+mediaDropTarget.onDragStateChange(({ isDragging }) => {
+	surface.classList.toggle("media-drag-active", isDragging);
+});
+
+mediaDropTarget.onDrop(({ files, screenPoint }) => {
+	void importDroppedMedia(files, screenPoint);
+});
+
+let nextNodeId =
+	layerWorld.getNodes().reduce((maxId, node) => {
+		return typeof node.id === "number"
+			? Math.max(maxId, node.id)
+			: maxId;
+	}, 0) + 1;
+
+function createNodeId(): number {
+	while (layerWorld.hasNode(nextNodeId)) {
+		nextNodeId += 1;
+	}
+
+	return nextNodeId++;
+}
+
+async function importDroppedMedia(
+	files: readonly File[],
+	screenPoint: { x: number; y: number },
+): Promise<void> {
+	const results = await mediaImporter.importMany(files);
+
+	console.log(results)
+
+	/*
+	 * MediaDropTarget возвращает CSS-координаты относительно surface.
+	 * Camera ожидает координаты viewport сцены.
+	 */
+	const bounds = surface.getBoundingClientRect();
+
+	const viewportPoint = {
+		x: screenPoint.x * (scene.getWidth() / bounds.width),
+		y: screenPoint.y * (scene.getHeight() / bounds.height),
+	};
+
+	const worldPoint = layerWorld.camera.screenToWorld(viewportPoint);
+
+	let offset = 0;
+
+	for (const result of results) {
+		if (result.status === "rejected") {
+			console.warn("Media import failed:", result.source, result.error);
+			continue;
+		}
+
+		const media = result.media;
+		const id = createNodeId();
+
+		const node =
+			media.kind === MediaKind.Image
+				? new NodeImage(id, media.name)
+				: new NodeVideo(id, media.name);
+		node.setFit(ImageFit.Fill);
+
+		const size = fitMediaSize(media.width, media.height, 600);
+
+		/*
+		 * Для NodeVideo setSrc() сначала сбрасывает размер,
+		 * поэтому setSize() вызываем после setSrc().
+		 */
+		node.setSrc(media.src);
+		node.setSize(size.width, size.height);
+
+		/*
+		 * Центрируем медиа относительно точки drop.
+		 * offset разводит несколько одновременно добавленных файлов.
+		 */
+		node.setPosition(
+			worldPoint.x - size.width / 2 + offset,
+			worldPoint.y - size.height / 2 + offset,
+		);
+
+		if (node instanceof NodeVideo) {
+			node.mute();
+			node.setLooping(true);
+			node.setAutoplay(true);
+		}
+
+		const added = layerWorld.addNode(node);
+
+		if (!added) {
+			media.release();
+			continue;
+		}
+
+		mediaResources.set(id, media);
+		offset += 24;
+	}
+
+	scene.invalidate();
+}
+
+function fitMediaSize(
+	width: number,
+	height: number,
+	maxSize: number,
+): { width: number; height: number } {
+	const scale = Math.min(1, maxSize / width, maxSize / height);
+
+	return {
+		width: width * scale,
+		height: height * scale,
+	};
+}
 
 scene.invalidate();
 

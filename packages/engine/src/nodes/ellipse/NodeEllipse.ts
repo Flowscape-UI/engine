@@ -8,8 +8,7 @@ import {
 } from "../shape";
 import type { INodeEllipse } from "./types";
 import type { ID } from "../../core/types";
-import { EPSILON } from "../..";
-
+import { EPSILON } from "../../core/math";
 export class NodeEllipse extends ShapeBase implements INodeEllipse {
 	private _innerRatio: number;
 	private _startAngle: number;

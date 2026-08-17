@@ -1,6 +1,6 @@
 {
 	"name": "@flowscape-ui/core-sdk",
-	"version": "2.0.4",
+	"version": "2.0.5",
 	"description": "Framework-agnostic 2D graphics engine for infinite canvases, editors, design tools, and visual applications.",
 	"license": "MIT",
 	"sideEffects": false,

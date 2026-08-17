@@ -223,9 +223,13 @@ export type ShapePathCommand =
 			point: Vector2;
 	  };
 
-export type ShapeStrokePath = {
+export type ShapeStrokeArea = {
 	outer: readonly ShapePathCommand[];
 	inner: readonly ShapePathCommand[];
+};
+
+export type ShapeStrokePath = ShapeStrokeArea & {
+	additionalAreas?: readonly ShapeStrokeArea[];
 };
 
 export interface IShapeBase extends INode {
@@ -245,6 +249,8 @@ export interface IShapeBase extends INode {
 	getGeometry(): ShapeGeometry;
 
 	toPathCommands(): readonly ShapePathCommand[];
+
+	toStrokePathCommands(): readonly ShapePathCommand[];
 
 	/***********************************************************/
 	/*                        Appearance                       */

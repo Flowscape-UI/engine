@@ -701,7 +701,7 @@ export class NodePath extends ShapeBase implements INodePath {
 			height: number;
 		},
 	): Vector2 {
-		const view = this.getLocalViewOBB();
+		const view = this.getLocalOBB();
 
 		const nx =
 			sourceBounds.width > 0

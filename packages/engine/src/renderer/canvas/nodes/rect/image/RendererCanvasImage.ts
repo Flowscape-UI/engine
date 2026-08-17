@@ -1,6 +1,10 @@
 import Konva from "konva";
 import { RendererCanvasBase } from "../../base";
 import { ImageFit, type NodeImage } from "../../../../../nodes";
+import { appendShapePath } from "../../../utils";
+
+const MEDIA_CONTENT_NAME = "media-content";
+const MEDIA_CONTENT_SELECTOR = `.${MEDIA_CONTENT_NAME}`;
 
 const IMAGE_NAME = "image-fill";
 const IMAGE_SELECTOR = `.${IMAGE_NAME}`;
@@ -11,6 +15,10 @@ export class RendererCanvasImage extends RendererCanvasBase<NodeImage> {
 	public create(node: NodeImage): Konva.Group {
 		const group = new Konva.Group({
 			id: String(node.id),
+		});
+		const mediaContent = new Konva.Group({
+			name: MEDIA_CONTENT_NAME,
+			listening: false,
 		});
 
 		const image = new Konva.Image({
@@ -23,19 +31,35 @@ export class RendererCanvasImage extends RendererCanvasBase<NodeImage> {
 			image: undefined,
 		});
 
-		group.add(image);
+		mediaContent.add(image);
+		group.add(mediaContent);
 
 		return group;
 	}
 
 	protected onUpdate(node: NodeImage, view: Konva.Group): void {
-		const image = this._findOneOrThrow<Konva.Image>(view, IMAGE_SELECTOR);
+		const mediaContent = this._findOneOrThrow<Konva.Group>(
+			view,
+			MEDIA_CONTENT_SELECTOR,
+		);
+
+		const image = this._findOneOrThrow<Konva.Image>(
+			view,
+			IMAGE_SELECTOR,
+		);
 
 		const width = Math.max(0, node.getWidth());
 		const height = Math.max(0, node.getHeight());
 
+		const clipCommands = node.toPathCommands();
+
+		mediaContent.clipFunc((context) => {
+			appendShapePath(context, clipCommands);
+		});
+
 		image.width(width);
 		image.height(height);
+
 
 		const src = node.getSrc();
 

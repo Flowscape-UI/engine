@@ -21,6 +21,7 @@ import {
 	type ShapeStrokePath,
 	type StrokeDashedStyleProperties,
 	type StrokeStyleProperties,
+	type ShapeStrokeArea,
 } from "../../../../nodes";
 
 import {
@@ -36,6 +37,7 @@ import { getLayerBlurRasterBounds } from "../../effects/blur";
 import { getDropShadowRasterBounds } from "../../effects/shadow/renderShadowRaster";
 import { RendererCanvasBase } from "../base";
 import { EPSILON, type Matrix } from "../../../../core";
+import { appendShapePath } from "../../utils";
 
 const FILL_SHAPE_NAME = "shape-fill";
 const FILL_SHAPE_SELECTOR = `.${FILL_SHAPE_NAME}`;
@@ -120,7 +122,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 
 		const backgroundBlur = new RendererEffectBackgroundBlur(
 			(context, commands) => {
-				this._appendPath(context, commands);
+				appendShapePath(context, commands);
 			},
 		);
 
@@ -130,11 +132,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 			dropShadows: new Map(),
 			innerShadows: new Map(),
 			layerBlur: new RendererShapeEffectLayerBlur(),
-			backgroundBlur: new RendererEffectBackgroundBlur(
-				(context, commands) => {
-					this._appendPath(context, commands);
-				},
-			),
+			backgroundBlur,
 		});
 
 		return group;
@@ -178,6 +176,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 
 	protected override onUpdate(node: IShapeBase, view: Konva.Group): void {
 		const commands = node.toPathCommands();
+		const strokeCommands = node.toStrokePathCommands();
 		const fillCommands = this._extractClosedFillCommands(commands);
 		const fillBounds = node.getLocalOBB();
 		const viewBounds = node.getLocalViewOBB();
@@ -252,7 +251,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 				? StrokeDashCap.Round
 				: (strokeStyleProperties as StrokeDashedStyleProperties).cap;
 
-			strokePatternPaths = resolveStrokePatternGeometry(commands, {
+			strokePatternPaths = resolveStrokePatternGeometry(strokeCommands, {
 				strokeWidth,
 				strokeAlign: node.getStrokeAlign(),
 				length,
@@ -286,7 +285,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 		 * как per-segment stroke.
 		 */
 		strokeShape.setAttrs({
-			pathCommands: commands,
+			pathCommands: strokeCommands,
 			strokePath,
 			strokePatternPaths,
 			paintBounds: viewBounds,
@@ -299,7 +298,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 		});
 
 		const shadowGeometry = this._createShadowGeometry({
-			commands,
+			commands: strokeCommands,
 			fillCommands,
 			fillBounds,
 			viewBounds,
@@ -337,6 +336,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 			renderer.destroy();
 		}
 
+		state.backgroundBlur.destroy();
 		state.layerBlur.destroy();
 
 		state.dropShadows.clear();
@@ -354,35 +354,65 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 		const strokeAreas: CanvasShadowArea[] = [];
 		let fallbackStroke: CanvasShadowGeometry["fallbackStroke"] = null;
 
-		if (
+		const usesPatternStroke =
 			input.strokeStyle === StrokeStyle.Dashed ||
-			input.strokeStyle === StrokeStyle.Dotted
-		) {
+			input.strokeStyle === StrokeStyle.Dotted;
+
+		if (usesPatternStroke) {
 			for (const path of input.strokePatternPaths) {
 				strokeAreas.push({
 					commands: path.commands,
 					fillRule: "evenodd",
 				});
 			}
-		} else if (input.strokePath?.outer.length) {
-			strokeAreas.push({
-				commands: [
-					...input.strokePath.outer,
-					...input.strokePath.inner,
-				],
-				fillRule: "evenodd",
-			});
-		} else if (
-			input.strokeMode === FillMode.Color &&
-			input.strokeWidth > 0 &&
-			input.commands.length > 0
-		) {
-			fallbackStroke = {
-				commands: input.commands,
-				width: input.strokeWidth,
-				lineCap: "butt",
-				lineJoin: "miter",
-			};
+			for (const area of input.strokePath?.additionalAreas ?? []) {
+				if (area.outer.length === 0) {
+					continue;
+				}
+
+				strokeAreas.push({
+					commands: [
+						...area.outer,
+						...area.inner,
+					],
+					fillRule: "evenodd",
+				});
+			}
+		} else {
+			if (input.strokePath) {
+				const areas: readonly ShapeStrokeArea[] = [
+					input.strokePath,
+					...(input.strokePath.additionalAreas ?? []),
+				];
+
+				for (const area of areas) {
+					if (area.outer.length === 0) {
+						continue;
+					}
+
+					strokeAreas.push({
+						commands: [
+							...area.outer,
+							...area.inner,
+						],
+						fillRule: "evenodd",
+					});
+				}
+			}
+
+			if (
+				strokeAreas.length === 0 &&
+				input.strokeMode === FillMode.Color &&
+				input.strokeWidth > 0 &&
+				input.commands.length > 0
+			) {
+				fallbackStroke = {
+					commands: input.commands,
+					width: input.strokeWidth,
+					lineCap: "butt",
+					lineJoin: "miter",
+				};
+			}
 		}
 
 		const hasStroke = strokeAreas.length > 0 || fallbackStroke !== null;
@@ -448,7 +478,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 			state = {
 				backgroundBlur: new RendererEffectBackgroundBlur(
 					(context, commands) => {
-						this._appendPath(context, commands);
+						appendShapePath(context, commands);
 					},
 				),
 				dropShadows: new Map(),
@@ -644,7 +674,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 		return Math.max(
 			1,
 			pixelRatio *
-				Math.max(Math.abs(absoluteScale.x), Math.abs(absoluteScale.y)),
+			Math.max(Math.abs(absoluteScale.x), Math.abs(absoluteScale.y)),
 		);
 	}
 
@@ -681,7 +711,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 
 				ctx.beginPath();
 
-				this._appendPath(ctx, commands);
+				appendShapePath(ctx, commands);
 
 				this._drawFill(ctx, shape, bounds, fillMode, fillValue);
 			},
@@ -710,6 +740,9 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 					(shape.getAttr("strokeStyle") as StrokeStyle | undefined) ??
 					StrokeStyle.Solid;
 
+				const strokePath = shape.getAttr("strokePath") as
+					ShapeStrokePath | null | undefined;
+
 				if (
 					strokeStyle === StrokeStyle.Dashed ||
 					strokeStyle === StrokeStyle.Dotted
@@ -717,43 +750,75 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 					const paths = shape.getAttr("strokePatternPaths") as
 						readonly ResolvedStrokePatternPathSegment[] | undefined;
 
-					if (!paths || paths.length === 0) {
-						return;
+					if (paths && paths.length > 0) {
+						ctx.beginPath();
+
+						for (const path of paths) {
+							appendShapePath(ctx, path.commands);
+						}
+
+						this._drawStrokeArea(
+							ctx,
+							shape,
+							strokeMode,
+							strokeValue,
+						);
 					}
 
-					ctx.beginPath();
+					/*
+					 * Ending остаются цельными независимо
+					 * от паттерна основной линии.
+					 */
+					for (const area of strokePath?.additionalAreas ?? []) {
+						if (area.outer.length === 0) {
+							continue;
+						}
 
-					for (const path of paths) {
-						this._appendPath(ctx, path.commands);
+						ctx.beginPath();
+
+						appendShapePath(ctx, area.outer);
+
+						if (area.inner.length > 0) {
+							appendShapePath(ctx, area.inner);
+						}
+
+						this._drawStrokeArea(
+							ctx,
+							shape,
+							strokeMode,
+							strokeValue,
+						);
 					}
-
-					this._drawStrokeArea(ctx, shape, strokeMode, strokeValue);
 
 					return;
 				}
 
-				const strokePath = shape.getAttr("strokePath") as
-					ShapeStrokePath | null | undefined;
-
-				/*
-				 * Полноценный stroke-area.
-				 *
-				 * outer - inner
-				 */
 				if (strokePath) {
-					if (strokePath.outer.length === 0) {
-						return;
+					const areas: readonly ShapeStrokeArea[] = [
+						strokePath,
+						...(strokePath.additionalAreas ?? []),
+					];
+
+					for (const area of areas) {
+						if (area.outer.length === 0) {
+							continue;
+						}
+
+						ctx.beginPath();
+
+						appendShapePath(ctx, area.outer);
+
+						if (area.inner.length > 0) {
+							appendShapePath(ctx, area.inner);
+						}
+
+						this._drawStrokeArea(
+							ctx,
+							shape,
+							strokeMode,
+							strokeValue,
+						);
 					}
-
-					ctx.beginPath();
-
-					this._appendPath(ctx, strokePath.outer);
-
-					if (strokePath.inner.length > 0) {
-						this._appendPath(ctx, strokePath.inner);
-					}
-
-					this._drawStrokeArea(ctx, shape, strokeMode, strokeValue);
 
 					return;
 				}
@@ -792,7 +857,7 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 
 				ctx.beginPath();
 
-				this._appendPath(ctx, commands);
+				appendShapePath(ctx, commands);
 
 				ctx.strokeStyle = strokeValue;
 
@@ -854,49 +919,6 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 	/*                         Path                          */
 	/*********************************************************/
 
-	private _appendPath(
-		ctx: Konva.Context,
-		commands: readonly ShapePathCommand[],
-	): void {
-		for (const command of commands) {
-			switch (command.type) {
-				case "moveTo":
-					ctx.moveTo(command.point.x, command.point.y);
-					break;
-
-				case "lineTo":
-					ctx.lineTo(command.point.x, command.point.y);
-					break;
-
-				case "quadraticCurveTo":
-					ctx.quadraticCurveTo(
-						command.control.x,
-						command.control.y,
-						command.point.x,
-						command.point.y,
-					);
-					break;
-
-				case "arcTo":
-					this._appendArc(
-						ctx,
-						command.center.x,
-						command.center.y,
-						command.radiusX,
-						command.radiusY,
-						command.startAngle,
-						command.endAngle,
-						command.clockwise,
-					);
-					break;
-
-				case "closePath":
-					ctx.closePath();
-					break;
-			}
-		}
-	}
-
 	private _drawGradientStroke(
 		ctx: Konva.Context,
 		shape: Konva.Shape,
@@ -932,35 +954,6 @@ export class RendererCanvasShape extends RendererCanvasBase<IShapeBase> {
 		ctx.translate(bounds.x, bounds.y);
 
 		gradientPaint.draw(ctx, bounds.width, bounds.height, renderScale);
-
-		ctx.restore();
-	}
-
-	private _appendArc(
-		ctx: Konva.Context,
-		centerX: number,
-		centerY: number,
-		radiusX: number,
-		radiusY: number,
-		startAngle: number,
-		endAngle: number,
-		clockwise: boolean,
-	): void {
-		if (radiusX <= 0 || radiusY <= 0) {
-			return;
-		}
-
-		const startRadians = (startAngle * Math.PI) / 180;
-
-		const endRadians = (endAngle * Math.PI) / 180;
-
-		ctx.save();
-
-		ctx.translate(centerX, centerY);
-
-		ctx.scale(radiusX, radiusY);
-
-		ctx.arc(0, 0, 1, startRadians, endRadians, !clockwise);
 
 		ctx.restore();
 	}
