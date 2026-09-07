@@ -54,8 +54,8 @@
 		"konva": "^10.0.12"
 	},
 	"devDependencies": {
-		"tsdown": "^0.22.9",
-		"typescript": "^5.9.2",
-		"vitest": "^2.1.9"
+		"tsdown": "^0.23.0",
+		"typescript": "^7.0.2",
+		"vitest": "^5.0.0"
 	}
 }
